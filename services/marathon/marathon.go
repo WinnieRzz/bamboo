@@ -11,6 +11,7 @@ import (
 
 // Describes an app process running
 type Task struct {
+	Id    string
 	Host  string
 	Port  int
 	Ports []int
@@ -28,15 +29,17 @@ type HealthCheck struct {
 
 // An app may have multiple processes
 type App struct {
-	Id              string
-	EscapedId       string
-	HealthCheckPath string
-	HealthChecks    []HealthCheck
-	Tasks           []Task
-	ServicePort     int
-	ServicePorts    []int
-	Env             map[string]string
-	Labels          map[string]string
+	Id                  string
+	MesosDnsId          string
+	EscapedId           string
+	HealthCheckPath     string
+	HealthCheckProtocol string
+	HealthChecks        []HealthCheck
+	Tasks               []Task
+	ServicePort         int
+	ServicePorts        []int
+	Env                 map[string]string
+	Labels              map[string]string
 }
 
 type AppList []App
@@ -195,11 +198,13 @@ func createApps(tasksById map[string]marathonTaskList, marathonApps map[string]m
 
 		// build App from marathonApp
 		app := App{
-			Id:              appPath,
-			EscapedId:       strings.Replace(appId, "/", "::", -1),
-			HealthCheckPath: parseHealthCheckPath(mApp.HealthChecks),
-			Env:             mApp.Env,
-			Labels:          mApp.Labels,
+			Id:                  appPath,
+			MesosDnsId:          getMesosDnsId(appPath),
+			EscapedId:           strings.Replace(appId, "/", "::", -1),
+			HealthCheckPath:     parseHealthCheckPath(mApp.HealthChecks),
+			HealthCheckProtocol: parseHealthCheckProtocol(mApp.HealthChecks),
+			Env:                 mApp.Env,
+			Labels:              mApp.Labels,
 		}
 
 		app.HealthChecks = make([]HealthCheck, 0, len(mApp.HealthChecks))
@@ -222,6 +227,7 @@ func createApps(tasksById map[string]marathonTaskList, marathonApps map[string]m
 		for _, mTask := range tasksById[appId] {
 			if len(mTask.Ports) > 0 {
 				t := Task{
+					Id:    mTask.Id,
 					Host:  mTask.Host,
 					Port:  mTask.Ports[0],
 					Ports: mTask.Ports,
@@ -236,12 +242,36 @@ func createApps(tasksById map[string]marathonTaskList, marathonApps map[string]m
 	return apps
 }
 
+func getMesosDnsId(appPath string) string {
+	// split up groups and recombine for how mesos-dns/consul/etc use service name
+	//   "/nested/group/app" -> "app-group-nested"
+	groups := strings.Split(appPath, "/")
+	reverseGroups := []string{}
+	for i := len(groups) - 1; i >= 0; i-- {
+		if groups[i] != "" {
+			reverseGroups = append(reverseGroups, groups[i])
+		}
+	}
+	return strings.Join(reverseGroups, "-")
+}
+
 func parseHealthCheckPath(checks []marathonHealthCheck) string {
 	for _, check := range checks {
-		if check.Protocol != "HTTP" {
+		if check.Protocol != "HTTP" && check.Protocol != "HTTPS" {
 			continue
 		}
 		return check.Path
+	}
+	return ""
+}
+
+/* maybe combine this with the above? */
+func parseHealthCheckProtocol(checks []marathonHealthCheck) string {
+	for _, check := range checks {
+		if check.Protocol != "HTTP" && check.Protocol != "HTTPS" {
+			continue
+		}
+		return check.Protocol
 	}
 	return ""
 }
